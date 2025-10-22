@@ -21,6 +21,9 @@ I have 2 pairs of functions as follows:
 Please help me create a new function that has a totally different form from the given ones.
 The function must be continuous, differentiable, monotonically increasing and positive for x in the interval [0,1]. 
 When x is 1.0 or 0.0, the corresponding value calculated by the designed function should also be 1.0 or 0.0.
+
+Provide the Python function code, using numpy (np) if necessary. 
+Only output the right-hand side expression of the function (after 'return'), with no code block, no explanations, no imports, and no function definition.
 """
 
 Evolve_prompt_2 = """
@@ -31,6 +34,9 @@ I have 2 pairs of functions as follows:
 Please help me create a new function that is motivated by the given ones.
 The function must be continuous, differentiable, monotonically increasing and positive for x in the interval [0,1]. 
 When x is 1.0 or 0.0, the corresponding value calculated by the designed function should also be 1.0 or 0.0.
+
+Provide the Python function code, using numpy (np) if necessary. 
+Only output the right-hand side expression of the function (after 'return'), with no code block, no explanations, no imports, and no function definition.
 """
 
 Evolve_prompt_3 = """
@@ -40,6 +46,9 @@ I have one function as follows:
 Please help me create a new function that is a revision of the given one.
 The function must be continuous, differentiable, monotonically increasing and positive for x in the interval [0,1]. 
 When x is 1.0 or 0.0, the corresponding value calculated by the designed function should also be 1.0 or 0.0.
+
+Provide the Python function code, using numpy (np) if necessary. 
+Only output the right-hand side expression of the function (after 'return'), with no code block, no explanations, no imports, and no function definition.
 """
 
 Evolve_prompt_4 = """
@@ -49,4 +58,7 @@ I have one function as follows:
 Please help me create a new function that has different parameter settings of the given one.
 The function must be continuous, differentiable, monotonically increasing and positive for x in the interval [0,1]. 
 When x is 1.0 or 0.0, the corresponding value calculated by the designed function should also be 1.0 or 0.0.
+
+Provide the Python function code, using numpy (np) if necessary. 
+Only output the right-hand side expression of the function (after 'return'), with no code block, no explanations, no imports, and no function definition.
 """

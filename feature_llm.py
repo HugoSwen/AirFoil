@@ -1,3 +1,4 @@
+import ast
 import os
 from typing import List
 import openai
@@ -8,14 +9,16 @@ from CST import CSTAirfoilParameterization
 from prompt import Initialize_prompt_A, Initialize_prompt_B, Initialize_prompt_C, \
     Evolve_prompt_1, Evolve_prompt_2, Evolve_prompt_3, Evolve_prompt_4
 
+
 class LLMSymbolicRegression:
     def __init__(self):
         self.client = openai.OpenAI(
             api_key=os.getenv("API_KEY"),
             base_url='https://api.siliconflow.cn/v1',
         )
+        self.model = "Qwen/Qwen3-32B"
         self.population = []
-        self.fitness_values = []
+        self.fitness_errors = []
 
     def llm_query(self, prompt: str, model: str = "Qwen/Qwen3-32B", temperature: float = 0.8):
         """
@@ -29,6 +32,9 @@ class LLMSymbolicRegression:
             temperature=temperature,
             extra_body={"enable_thinking": False}
         )
+
+        print(f"LLM Response: {response.choices[0].message.content}")
+
         return response.choices[0].message.content
 
     def extract_function_code(self, llm_response: str) -> str:
@@ -36,14 +42,22 @@ class LLMSymbolicRegression:
         从LLM响应中提取Python函数代码
         """
         # TODO: 这里需要实现具体的提取逻辑
-        
-        pass
+        function_code = llm_response.replace("return", "").strip()
+        try:
+            ast.parse(function_code, mode='eval')
+        except Exception as e:
+            # raise ValueError(f"Invalid function expression syntax: {llm_response}") from e
+            print(
+                f"Invalid function expression syntax: {function_code}")
+            function_code = "x"  # 默认返回恒等函数，避免程序中断
+
+        return function_code
 
     # 初始化种群
-    def initialize(self, population_size: int = 15, prompt_level: str = "B"):
+    def initialize(self, population_size: int = 15, prompt_level: str = "B", model: str = "Qwen/Qwen3-32B"):
         """
         根据不同的提示级别初始化种群
-        
+
         Args:
             population_size: 种群大小
             prompt_level: 提示级别 A/B/C
@@ -51,57 +65,74 @@ class LLMSymbolicRegression:
                 B: 添加数学洞察
                 C: 添加先前表现良好的函数
         """
-    
+
+        print("Initializing population...")
+        print(f"Prompt level: {prompt_level}")
+
         # 基础初始化提示
-        if prompt_level == "A":
-            initialize_prompt = Initialize_prompt_A
-        
+        prompt = Initialize_prompt_A
+
         # 根据实验级别添加数学洞察
-        elif prompt_level == "B":
-            initialize_prompt += Initialize_prompt_B
+        if prompt_level == "B":
+            prompt = Initialize_prompt_B
 
         # 对于实验C，添加先前表现良好的函数
-        elif prompt_level == "C":
-            well_performed_functions = self.load_well_performed_functions()
-            initialize_prompt += Initialize_prompt_C.format(functions="\n".join(well_performed_functions))
+        if prompt_level == "C":
+            prompt = Initialize_prompt_C.format(
+                functions="\n".join(self.population))
 
         population = []
-        for i in range(population_size):
-            response = self.llm_query(prompt=initialize_prompt)
-            function_code = self.extract_function_code(response.choices[0].message.content)
+        for _ in range(population_size):
+            print(f"Generating individual {_ + 1}/{population_size}")
+            response = self.llm_query(prompt, model=model)
+            function_code = self.extract_function_code(response)
             population.append(function_code)
-        
+
         self.population = population
+
+        print(f"Initialized population: {self.population}")
+
         return population
 
     # 评估函数
-    def evaluate(self, function_code: str, airfoil_data_path: str, order=8, N1=0.5, N2=1.0, is_upper=True):
+    def evaluate(self, functions: List[str],
+                 airfoil_data_path: str,
+                 order=8,
+                 N1=0.5,
+                 N2=1.0,
+                 is_upper=True):
         """
         评估函数的适应度（拟合误差）
-        
+
         Args:
             function_code: 要评估的函数代码
             airfoil_data_path: 翼型数据集路径
         """
-        try:
-            # 提取翼型数据
-            airfoil_data = pd.read_csv(airfoil_data_path, header=None)
 
-            # 动态创建并执行函数
-            t_func = self.create_executable_function(function_code)
+        print("Evaluating functions...")
 
-            # 计算加权误差
-            x_original, z_original, z_pred = self.call_cst(t_func, airfoil_data, order, N1, N2, is_upper)
+        # 提取翼型数据
+        fitting_error = []
+        airfoil_data = pd.read_csv(airfoil_data_path, header=None)
 
-            weights = np.where(x_original < 0.2, 2.0, 1.0)
-            fitting_error = np.sum(weights * (z_original - z_pred))
+        for func in functions:
+            try:
+                # 动态创建并执行函数
+                t_func = self.create_executable_function(func)
 
-            return fitting_error
-            
-        except Exception as e:
-            # 对于无效函数返回一个很大的数值
-            print(f"Error evaluating function {function_code}: {e}")
-            return float('inf')
+                # 计算加权误差
+                x_original, z_original, z_pred = self.call_cst(
+                    t_func, airfoil_data, order, N1, N2, is_upper)
+
+                weights = np.where(x_original < 0.2, 2.0, 1.0)
+                fitting_error.append(np.sum(weights * (z_original - z_pred)))
+
+            except Exception as e:
+                # 对于无效函数返回一个很大的数值
+                print(f"Error evaluating function {func}: {e}")
+                fitting_error.append(float('inf'))
+
+        return fitting_error
 
     def create_executable_function(self, function_code: str):
         """
@@ -117,12 +148,13 @@ class LLMSymbolicRegression:
         af_x = airfoil_data.iloc[:, 0].to_numpy()
         af_z = airfoil_data.iloc[:, 1].to_numpy()
 
-        af_x_upper = af_x[:26][::-1]
-        af_z_upper = af_z[:26][::-1]
-        af_x_lower = af_x[26:]
-        af_z_lower = af_z[26:]
+        af_x_upper = af_x[:42]
+        af_z_upper = af_z[:42]
+        af_x_lower = af_x[42:]
+        af_z_lower = af_z[42:]
 
-        cst = CSTAirfoilParameterization(order=order, N1=N1, N2=N2, t_func=t_func)
+        cst = CSTAirfoilParameterization(
+            order=order, N1=N1, N2=N2, t_func=t_func)
 
         if is_upper:
             cst.fit_airfoil(af_x_upper, af_z_upper)
@@ -133,13 +165,13 @@ class LLMSymbolicRegression:
             af_z_lower_pred = cst.generate_airfoil(af_x_lower, is_upper=False)
             return af_x_lower, af_z_lower, af_z_lower_pred
 
-
     # 不同的进化策略
-    def evolution(self, parent_functions: List[str], strategy: int):
+
+    def evolution(self, functions: List[str], strategy: int, model: str = "Qwen/Qwen3-32B"):
         """
         根据不同的策略生成新函数
         Args:
-            parent_functions: 父代函数列表
+            functions: 父代函数列表
             strategy: 进化策略编号
                 1: 完全不同的形式
                 2: 受给定函数启发
@@ -147,95 +179,134 @@ class LLMSymbolicRegression:
                 4: 改变参数设置
         """
         new_functions = []
-        
+
         if strategy == 1:
-            for i in range(0, len(parent_functions)-1, 2):
+            for i in range(0, len(functions)-1, 2):
                 prompt = Evolve_prompt_1.format(
-                    function_1=parent_functions[i],
-                    function_2=parent_functions[i+1]
+                    function_1=functions[i],
+                    function_2=functions[i+1]
                 )
-                response = self.llm_query(prompt)
+                response = self.llm_query(prompt, model=model)
                 new_functions.append(self.extract_function_code(response))
 
         elif strategy == 2:
-            for i in range(0, len(parent_functions)-1, 2):
+            for i in range(0, len(functions)-1, 2):
                 prompt = Evolve_prompt_2.format(
-                    function_1=parent_functions[i],
-                    function_2=parent_functions[i+1]
+                    function_1=functions[i],
+                    function_2=functions[i+1]
                 )
-                response = self.llm_query(prompt)
+                response = self.llm_query(prompt, model=model)
                 new_functions.append(self.extract_function_code(response))
 
         elif strategy == 3:
-            for func in parent_functions[:3]:  # 取前3个最好的函数
+            for func in functions:
                 prompt = Evolve_prompt_3.format(function=func)
-                response = self.llm_query(prompt)
+                response = self.llm_query(prompt, model=model)
                 new_functions.append(self.extract_function_code(response))
 
         elif strategy == 4:
-            for func in parent_functions[:3]:
+            for func in functions:
                 prompt = Evolve_prompt_4.format(function=func)
-                response = self.llm_query(prompt)
+                response = self.llm_query(prompt, model=model)
                 new_functions.append(self.extract_function_code(response))
 
         return new_functions
-    
-    def evolve(self, current_population: List[str], fitness_scores: List[float]):
+
+    def evolve(self, population: List[str], model: str = "Qwen/Qwen3-32B"):
         """
         使用四种进化策略生成新一代种群
         """
+
+        print("Evolving population...")
+
         new_population = []
-        
-        # 选择表现最好的个体作为父代
-        sorted_indices = np.argsort(fitness_scores)
-        best_functions = [current_population[i] for i in sorted_indices[:5]]
-        
+
         # 策略1: 完全不同的形式
-        new_population.extend(self.evolution(best_functions, 1))
-        
+        print("Generating with strategy 1...")
+        new_population.extend(self.evolution(population, 1, model=model))
+
         # 策略2: 受给定函数启发
-        new_population.extend(self.evolution(best_functions, 2))
+        print("Generating with strategy 2...")
+        new_population.extend(self.evolution(population, 2, model=model))
 
         # 策略3: 修订给定函数
-        new_population.extend(self.evolution(best_functions, 3))
+        print("Generating with strategy 3...")
+        new_population.extend(self.evolution(population, 3, model=model))
 
         # 策略4: 改变参数设置
-        new_population.extend(self.evolution(best_functions, 4))
+        print("Generating with strategy 4...")
+        new_population.extend(self.evolution(population, 4, model=model))
 
-        # 排序并截取前N个作为新一代种群
-        new_population = sorted(new_population, key=lambda f: self.evaluate(f, airfoil_data_path="path/to/airfoil.csv"))
+        return new_population
 
-        return new_population[:len(current_population)]  # 保持种群大小不变
-    
+    # 种群管理
+    def manage(self, population: List[str],
+               population_size: int,
+               airfoil_data_path: str,
+               order=8,
+               N1=0.5,
+               N2=1.0,
+               is_upper=True):
+        """
+        管理种群大小，保留表现最好的个体
+        """
 
-    def run_evolution(self, airfoil_data_path: str, 
-                      num_generations: int = 20, 
-                      population_size: int = 15, 
-                      prompt_level: str = "B", 
-                      order=8, 
-                      N1=0.5, 
-                      N2=1.0):
+        print("Managing population...")
+
+        fitness_errors = self.evaluate(population,
+                                       airfoil_data_path,
+                                       order,
+                                       N1,
+                                       N2,
+                                       is_upper)
+
+        sorted_indices = np.argsort(fitness_errors)
+        managed_population = [population[i]
+                              for i in sorted_indices[:population_size]]
+        managed_fitness_errors = [fitness_errors[i]
+                                  for i in sorted_indices[:population_size]]
+
+        return managed_population, managed_fitness_errors
+
+    def run(self, airfoil_data_path: str,
+            num_generations: int = 20,
+            population_size: int = 15,
+            prompt_level: str = "B",
+            model: str = "Qwen/Qwen3-32B",
+            order=8,
+            N1=0.5,
+            N2=1.0,
+            is_upper=True):
         """
         运行完整的LLM符号回归进化流程
         """
         print("Starting LLM-based symbolic regression...")
-        
+
         # 1. 初始化种群
-        self.initialize(population_size, prompt_level)
-        
-        best_function = None
-        best_fitting_error = float('inf')
-        
+        self.initialize(population_size, prompt_level, model=model)
+
         for generation in range(num_generations):
             print(f"Generation {generation + 1}/{num_generations}")
-            
+
             # 2. 评估
-            
+            self.fitness_errors = self.evaluate(
+                self.population, airfoil_data_path, order, N1, N2, is_upper)
+
             # 3. 进化
+            current_population = self.population
+            current_population.extend(
+                self.evolve(self.population, model=model))
 
             # 4. 种群管理
-            
-            # 5. 更新种群 (精英保留策略)
-            print(f"Best fitness: {best_fitting_error:.2f}")
+            self.population, self.fitness_errors = self.manage(current_population,
+                                                               population_size,
+                                                               airfoil_data_path,
+                                                               order,
+                                                               N1,
+                                                               N2,
+                                                               is_upper)
 
-        return best_function, best_fitting_error
+            # 5. 更新种群 (精英保留策略)
+            print(f"Current best fitness: {self.fitness_errors[0]:.2f}")
+
+        return self.population[0], self.fitness_errors[0]
