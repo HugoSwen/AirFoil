@@ -182,7 +182,7 @@ class LLMSymbolicRegression:
         new_functions = []
 
         if strategy == 1:
-            for i in range(len(functions)):
+            for i in range(len(functions) - 1):
                 prompt = Evolve_prompt_1.format(
                     function_1=functions[i],
                     function_2=functions[i+1]
@@ -191,7 +191,7 @@ class LLMSymbolicRegression:
                 new_functions.append(self.extract_function_code(response))
 
         elif strategy == 2:
-            for i in range(len(functions)):
+            for i in range(len(functions) - 1):
                 prompt = Evolve_prompt_2.format(
                     function_1=functions[i],
                     function_2=functions[i+1]
