@@ -316,6 +316,6 @@ class LLMSymbolicRegression:
                                                                is_upper)
 
             # 5. 更新种群 (精英保留策略)
-            print(f"Current best fitness: {self.fitness_errors[0]:.2f}")
+            print(f"Current best fitness: {self.fitness_errors[0]:.6f}")
 
         return self.population[0], self.fitness_errors[0]
