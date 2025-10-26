@@ -125,7 +125,8 @@ class LLMSymbolicRegression:
                     t_func, airfoil_data, order, N1, N2, is_upper)
 
                 weights = np.where(x_original < 0.2, 2.0, 1.0)
-                fitting_error.append(np.sum(weights * (z_original - z_pred)))
+                fitting_error.append(
+                    np.sum(weights * np.abs(z_original - z_pred)))
 
             except Exception as e:
                 # 对于无效函数返回一个很大的数值
@@ -181,7 +182,7 @@ class LLMSymbolicRegression:
         new_functions = []
 
         if strategy == 1:
-            for i in range(0, len(functions)-1, 2):
+            for i in range(len(functions)):
                 prompt = Evolve_prompt_1.format(
                     function_1=functions[i],
                     function_2=functions[i+1]
@@ -190,7 +191,7 @@ class LLMSymbolicRegression:
                 new_functions.append(self.extract_function_code(response))
 
         elif strategy == 2:
-            for i in range(0, len(functions)-1, 2):
+            for i in range(len(functions)):
                 prompt = Evolve_prompt_2.format(
                     function_1=functions[i],
                     function_2=functions[i+1]
