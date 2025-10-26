@@ -1,5 +1,6 @@
 import ast
 import os
+import re
 from typing import List
 import openai
 import numpy as np
@@ -41,8 +42,15 @@ class LLMSymbolicRegression:
         """
         从LLM响应中提取Python函数代码
         """
-        # TODO: 这里需要实现具体的提取逻辑
-        function_code = llm_response.replace("return", "").strip()
+        # 尝试从markdown代码块中提取代码
+        match = re.search(r"```python\n(.*?)\n```", llm_response, re.DOTALL)
+        if match:
+            function_code = match.group(1).strip()
+        else:
+            # 如果没有找到代码块，直接使用响应内容，并去除首尾空白
+            function_code = llm_response.strip()
+
+        function_code = function_code.replace("return", "").strip()
         try:
             ast.parse(function_code, mode='eval')
         except Exception as e:
