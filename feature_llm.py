@@ -25,14 +25,23 @@ class LLMSymbolicRegression:
         """
         向LLM发送查询并返回响应
         """
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            temperature=temperature,
-            # extra_body={"enable_thinking": False}
-        )
+        if model == "Qwen/Qwen3-32B" or model == "Qwen/Qwen3-14B" or model == "Qwen/Qwen3-8B" or model == "zai-org/GLM-4.6" or model == "Qwen/Qwen3-235B-A22B":
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=temperature,
+                extra_body={"enable_thinking": False}
+            )
+        else:
+             response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=temperature
+            )
 
         print(f"LLM Response: {response.choices[0].message.content}")
 
@@ -47,17 +56,22 @@ class LLMSymbolicRegression:
         if match:
             function_code = match.group(1).strip()
         else:
-            # 如果没有找到代码块，直接使用响应内容，并去除首尾空白
             function_code = llm_response.strip()
 
         function_code = function_code.replace("return", "").strip()
         try:
             ast.parse(function_code, mode='eval')
+            # 校验函数值是否在[0, 1] 范围内，并且是否单调递增
+            test_x = np.linspace(0, 1, 100)
+            test_y = eval(function_code, {'x': test_x, 'np': np})
+
+            if not (test_y[0] == 0.0 and test_y[-1] == 1.0 and np.all(test_y >= 0) and np.all(test_y <= 1) and np.all(np.diff(test_y) > 0)):
+                raise ValueError("Function output not in [0, 1] or not monotonically increasing")
         except Exception as e:
             # raise ValueError(f"Invalid function expression syntax: {llm_response}") from e
             print(
                 f"Invalid function expression syntax: {function_code}")
-            function_code = "x"  # 默认返回恒等函数，避免程序中断
+            function_code = "x"
 
         return function_code
 
