@@ -17,7 +17,6 @@ class LLMSymbolicRegression:
             api_key=os.getenv("API_KEY"),
             base_url='https://api.siliconflow.cn/v1',
         )
-        self.model = "Qwen/Qwen3-32B"
         self.population = []
         self.fitness_errors = []
 
@@ -118,7 +117,7 @@ class LLMSymbolicRegression:
 
     # 评估函数
     def evaluate(self, functions: List[str],
-                 airfoil_data_path: str,
+                 airfoil_data_paths: List[str],
                  order=8,
                  N1=0.5,
                  N2=1.0,
@@ -128,33 +127,38 @@ class LLMSymbolicRegression:
 
         Args:
             function_code: 要评估的函数代码
-            airfoil_data_path: 翼型数据集路径
+            airfoil_data_paths: 翼型数据集路径
         """
 
         print("Evaluating functions...")
 
         # 提取翼型数据
         fitting_error = []
-        airfoil_data = pd.read_csv(airfoil_data_path, header=None)
+        airfoil_data = []
+        for af_data_path in airfoil_data_paths:
+            airfoil_data.append((af_data_path, pd.read_csv(af_data_path, header=None)))
 
         for func in functions:
-            try:
-                # 动态创建并执行函数
-                t_func = self.create_executable_function(func)
+            error = 0.0
+            for af_data in airfoil_data:
+                try:
+                    # 动态创建并执行函数
+                    t_func = self.create_executable_function(func)
 
-                # 计算加权误差
-                x_original, z_original, z_pred = self.call_cst(
-                    t_func, airfoil_data, order, N1, N2, is_upper)
+                    # 计算加权误差
+                    x_original, z_original, z_pred = self.call_cst(
+                        t_func, af_data, order, N1, N2, is_upper)
 
-                weights = np.where(x_original < 0.2, 2.0, 1.0)
-                fitting_error.append(
-                    np.sum(weights * np.abs(z_original - z_pred)))
+                    weights = np.where(x_original < 0.2, 2.0, 1.0)
+                    error += np.sum(weights * np.abs(z_original - z_pred))
 
-            except Exception as e:
-                # 对于无效函数返回一个很大的数值
-                print(f"Error evaluating function {func}: {e}")
-                fitting_error.append(float('inf'))
+                except Exception as e:
+                    # 对于无效函数返回一个很大的数值
+                    print(f"Error evaluating function {func}: {e}")
+                    error = float('inf')
+                    break
 
+            fitting_error.append(error)
         return fitting_error
 
     def create_executable_function(self, function_code: str):
@@ -168,13 +172,34 @@ class LLMSymbolicRegression:
         调用CST预测翼型坐标
         """
         # TODO: 需要根据实际数据格式进行调整(写个函数读取翼型数据)
-        af_x = airfoil_data.iloc[:, 0].to_numpy()
-        af_z = airfoil_data.iloc[:, 1].to_numpy()
+        af_x = airfoil_data[1].iloc[:, 0].to_numpy()
+        af_z = airfoil_data[1].iloc[:, 1].to_numpy()
 
-        af_x_upper = af_x[:42]
-        af_z_upper = af_z[:42]
-        af_x_lower = af_x[42:]
-        af_z_lower = af_z[42:]
+        if airfoil_data[0] == "data/rae5214.csv":
+            af_x_upper = af_x[:42]
+            af_z_upper = af_z[:42]
+            af_x_lower = af_x[42:]
+            af_z_lower = af_z[42:]
+        elif airfoil_data[0] == "data/e63.csv":
+            af_x_upper = af_x[:33][::-1]
+            af_z_upper = af_z[:33][::-1]
+            af_x_lower = af_x[33:]
+            af_z_lower = af_z[33:]
+        elif airfoil_data[0] == "data/s1223.csv":
+            af_x_upper = af_x[:46][::-1]
+            af_z_upper = af_z[:46][::-1]
+            af_x_lower = af_x[46:]
+            af_z_lower = af_z[46:]
+        elif airfoil_data[0] == "data/clarky.csv":
+            af_x_upper = af_x[:61]
+            af_z_upper = af_z[:61]
+            af_x_lower = af_x[61:]
+            af_z_lower = af_z[61:]
+        elif airfoil_data[0] == "data/naca66215.csv":
+            af_x_upper = af_x[:26][::-1]
+            af_z_upper = af_z[:26][::-1]
+            af_x_lower = af_x[26:]
+            af_z_lower = af_z[26:]
 
         cst = CSTAirfoilParameterization(
             order=order, N1=N1, N2=N2, t_func=t_func)
@@ -265,7 +290,7 @@ class LLMSymbolicRegression:
     # 种群管理
     def manage(self, population: List[str],
                population_size: int,
-               airfoil_data_path: str,
+               airfoil_data_paths: List[str],
                order=8,
                N1=0.5,
                N2=1.0,
@@ -277,7 +302,7 @@ class LLMSymbolicRegression:
         print("Managing population...")
 
         fitness_errors = self.evaluate(population,
-                                       airfoil_data_path,
+                                       airfoil_data_paths,
                                        order,
                                        N1,
                                        N2,
@@ -291,7 +316,7 @@ class LLMSymbolicRegression:
 
         return managed_population, managed_fitness_errors
 
-    def run(self, airfoil_data_path: str,
+    def run(self, airfoil_data_paths: List[str],
             num_generations: int = 20,
             population_size: int = 15,
             prompt_level: str = "B",
@@ -313,7 +338,7 @@ class LLMSymbolicRegression:
 
             # 2. 评估
             self.fitness_errors = self.evaluate(
-                self.population, airfoil_data_path, order, N1, N2, is_upper)
+                self.population, airfoil_data_paths, order, N1, N2, is_upper)
 
             # 3. 进化
             current_population = self.population
@@ -323,7 +348,7 @@ class LLMSymbolicRegression:
             # 4. 种群管理
             self.population, self.fitness_errors = self.manage(current_population,
                                                                population_size,
-                                                               airfoil_data_path,
+                                                               airfoil_data_paths,
                                                                order,
                                                                N1,
                                                                N2,
