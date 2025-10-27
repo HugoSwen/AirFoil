@@ -31,7 +31,7 @@ class LLMSymbolicRegression:
                 {"role": "user", "content": prompt}
             ],
             temperature=temperature,
-            extra_body={"enable_thinking": False}
+            # extra_body={"enable_thinking": False}
         )
 
         print(f"LLM Response: {response.choices[0].message.content}")
