@@ -2,6 +2,7 @@ import ast
 import os
 import re
 from typing import List
+from matplotlib import pyplot as plt
 import openai
 import numpy as np
 import pandas as pd
@@ -13,10 +14,16 @@ from prompt import Initialize_prompt_A, Initialize_prompt_B, Initialize_prompt_C
 
 class LLMSymbolicRegression:
     def __init__(self):
-        self.client = openai.OpenAI(
-            api_key=os.getenv("API_KEY"),
-            base_url='https://api.siliconflow.cn/v1',
-        )
+        if os.getenv("OPENAI_API_KEY"):
+            self.client = openai.OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY"),
+                base_url='https://api.openai-proxy.org/v1',
+            )
+        elif os.getenv("SILICONFLOW_API_KEY"):
+            self.client = openai.OpenAI(
+                api_key=os.getenv("SILICONFLOW_API_KEY"),
+                base_url='https://api.siliconflow.cn/v1',
+            )
         self.population = []
         self.fitness_errors = []
 
@@ -24,27 +31,32 @@ class LLMSymbolicRegression:
         """
         向LLM发送查询并返回响应
         """
-        if model == "Qwen/Qwen3-32B" or model == "Qwen/Qwen3-14B" or model == "Qwen/Qwen3-8B" or model == "zai-org/GLM-4.6" or model == "Qwen/Qwen3-235B-A22B":
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=temperature,
-                extra_body={"enable_thinking": False}
-            )
-        else:
-             response = self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=temperature
-            )
+        for _ in range(3):
+            try:
+                if model == "Qwen/Qwen3-32B" or model == "Qwen/Qwen3-14B" or model == "Qwen/Qwen3-8B" or model == "zai-org/GLM-4.6" or model == "Qwen/Qwen3-235B-A22B" or model == "deepseek-ai/DeepSeek-V3.1":
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=temperature,
+                        extra_body={"enable_thinking": False}
+                    )
+                else:
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=temperature
+                    )
 
-        print(f"LLM Response: {response.choices[0].message.content}")
+                print(f"LLM Response: {response.choices[0].message.content}")
 
-        return response.choices[0].message.content
+                return response.choices[0].message.content
+            except Exception as e:
+                print(f"LLM query failed: {e}, retrying...")
+                continue
 
     def extract_function_code(self, llm_response: str) -> str:
         """
@@ -65,7 +77,8 @@ class LLMSymbolicRegression:
             test_y = eval(function_code, {'x': test_x, 'np': np})
 
             if not (test_y[0] == 0.0 and test_y[-1] == 1.0 and np.all(test_y >= 0) and np.all(test_y <= 1) and np.all(np.diff(test_y) > 0)):
-                raise ValueError("Function output not in [0, 1] or not monotonically increasing")
+                raise ValueError(
+                    "Function output not in [0, 1] or not monotonically increasing")
         except Exception as e:
             # raise ValueError(f"Invalid function expression syntax: {llm_response}") from e
             print(
@@ -136,7 +149,8 @@ class LLMSymbolicRegression:
         fitting_error = []
         airfoil_data = []
         for af_data_path in airfoil_data_paths:
-            airfoil_data.append((af_data_path, pd.read_csv(af_data_path, header=None)))
+            airfoil_data.append(
+                (af_data_path, pd.read_csv(af_data_path, header=None)))
 
         for func in functions:
             error = 0.0
@@ -357,4 +371,35 @@ class LLMSymbolicRegression:
             # 5. 更新种群 (精英保留策略)
             print(f"Current best fitness: {self.fitness_errors[0]:.6f}")
 
-        return self.population[0], self.fitness_errors[0]
+        return self.population[:5], self.fitness_errors[0:5]
+
+    def plot_function(self, function_codes: List[str]):
+        """
+        在 [0,1] 上绘制字符串函数列表。
+        """
+        plt.style.use('default')
+        plt.figure(figsize=(6, 4))
+
+        x = np.linspace(0.0, 1.0, 100)
+
+        for i, function_code in enumerate(function_codes):
+            label = f"tc{i+1}"
+            try:
+                t_func = self.create_executable_function(function_code)
+                y = t_func(x)
+                y = np.asarray(y, dtype=float)
+                plt.plot(x, y, linewidth=1, label=label)
+            except Exception as e:
+                print(f"绘制函数 {label} 失败，无法计算函数值: {e}")
+                continue
+
+        plt.xlim(0, 1)
+        plt.ylim(0, 1)
+
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+
+        plt.show()
