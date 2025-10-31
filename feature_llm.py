@@ -387,8 +387,8 @@ class LLMSymbolicRegression:
             try:
                 t_func = self.create_executable_function(function_code)
                 y = t_func(x)
-                y = np.asarray(y, dtype=float)
-                plt.plot(x, y, linewidth=1, label=label)
+                # y = np.asarray(y, dtype=float)
+                plt.plot(x, y, linewidth=1, label=label, linestyle='--')
             except Exception as e:
                 print(f"绘制函数 {label} 失败，无法计算函数值: {e}")
                 continue
